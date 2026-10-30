@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Isometric Cube - Top Face (Minecraft Green / Emerald) -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M54,28 L76,40 L54,52 L32,40 Z" />
+    
+    <!-- Isometric Cube - Left Face (Darker Stone / Slate) -->
+    <path
+        android:fillColor="#059669"
+        android:pathData="M32,40 L54,52 L54,76 L32,64 Z" />
+    
+    <!-- Isometric Cube - Right Face (Deep Shadow) -->
+    <path
+        android:fillColor="#047857"
+        android:pathData="M54,52 L76,40 L76,64 L54,76 Z" />
+    
+    <!-- Minecraft Pixel Texture Highlights on Top -->
+    <path
+        android:fillColor="#34D399"
+        android:pathData="M48,34 L54,37 L48,40 L42,37 Z" />
+    <path
+        android:fillColor="#A7F3D0"
+        android:pathData="M56,38 L62,41 L56,44 L50,41 Z" />
+
+    <!-- Server Activity Pulse Lights -->
+    <path
+        android:fillColor="#6EE7B7"
+        android:pathData="M38,48 L42,50 L42,54 L38,52 Z" />
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M38,56 L42,58 L42,62 L38,60 Z" />
+    
+    <!-- Wi-Fi / WAN Broadcast Waves above the cube -->
+    <path
+        android:strokeColor="#10B981"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M42,22 C49,18 59,18 66,22" />
+    <path
+        android:strokeColor="#34D399"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M46,25 C51,22 57,22 62,25" />
+</vector>

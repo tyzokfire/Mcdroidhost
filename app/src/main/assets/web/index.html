@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MC-Droid Host | Web Administration Dashboard</title>
+  <style>
+    :root {
+      --bg: #0b0f17;
+      --card-bg: #131b2a;
+      --card-border: #1f2d45;
+      --primary: #10b981;
+      --primary-hover: #059669;
+      --accent: #38bdf8;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --terminal-bg: #07090e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+    
+    header { background: #080c14; border-bottom: 1px solid var(--card-border); padding: 1rem 1.5rem; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 50; }
+    .brand { display: flex; align-items: center; gap: 0.75rem; font-weight: 700; font-size: 1.25rem; letter-spacing: -0.5px; }
+    .brand-cube { width: 28px; height: 28px; background: linear-gradient(135deg, var(--primary), #047857); border-radius: 6px; box-shadow: 0 0 12px rgba(16,185,129,0.4); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 900; color: #fff; }
+    .nav-tabs { display: flex; gap: 0.5rem; }
+    .nav-btn { background: transparent; border: 1px solid transparent; color: var(--text-muted); padding: 0.5rem 1rem; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.9rem; transition: all 0.2s; }
+    .nav-btn:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+    .nav-btn.active { color: var(--primary); background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.3); font-weight: 600; }
+    
+    main { padding: 1.5rem; max-width: 1300px; margin: 0 auto; width: 100%; flex: 1; }
+    
+    /* Grid & Cards */
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem; }
+    .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 1.25rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+    .card-title { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-bottom: 0.5rem; font-weight: 600; }
+    .card-value { font-size: 1.5rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; }
+    
+    /* Badges */
+    .status-badge { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.85rem; font-weight: 600; }
+    .status-running { background: rgba(16,185,129,0.2); color: var(--primary); border: 1px solid var(--primary); }
+    .status-stopped { background: rgba(239,68,68,0.2); color: var(--danger); border: 1px solid var(--danger); }
+    .status-pulse { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.8); } }
+    
+    /* Buttons */
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0.6rem 1.2rem; border-radius: 8px; font-weight: 600; font-size: 0.9rem; cursor: pointer; border: none; transition: all 0.2s; }
+    .btn-primary { background: var(--primary); color: #022c22; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-outline { background: transparent; border: 1px solid var(--card-border); color: var(--text); }
+    .btn-outline:hover { background: rgba(255,255,255,0.06); }
+    .btn-sm { padding: 0.35rem 0.7rem; font-size: 0.8rem; }
+    
+    /* Progress Bars */
+    .progress-bar-bg { width: 100%; height: 8px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; margin-top: 0.5rem; }
+    .progress-bar-fill { height: 100%; background: var(--primary); border-radius: 4px; transition: width 0.3s; }
+    
+    /* Terminal Console */
+    .terminal-container { background: var(--terminal-bg); border: 1px solid var(--card-border); border-radius: 12px; display: flex; flex-direction: column; height: 600px; overflow: hidden; }
+    .terminal-header { background: #0c1017; padding: 0.75rem 1rem; border-bottom: 1px solid var(--card-border); display: flex; justify-content: space-between; align-items: center; }
+    .terminal-output { flex: 1; padding: 1rem; overflow-y: auto; font-family: "Courier New", Courier, monospace; font-size: 0.85rem; line-height: 1.4; color: #a7f3d0; white-space: pre-wrap; word-break: break-all; }
+    .terminal-input-bar { display: flex; padding: 0.75rem; background: #0c1017; border-top: 1px solid var(--card-border); gap: 0.5rem; }
+    .terminal-input { flex: 1; background: #131b2a; border: 1px solid var(--card-border); border-radius: 6px; padding: 0.6rem 0.8rem; color: #fff; font-family: monospace; font-size: 0.9rem; outline: none; }
+    .terminal-input:focus { border-color: var(--primary); }
+    
+    /* File Manager & Editor */
+    .file-layout { display: grid; grid-template-columns: 320px 1fr; gap: 1rem; height: 600px; }
+    .file-tree { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; overflow-y: auto; padding: 0.75rem; }
+    .file-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.6rem; border-radius: 6px; cursor: pointer; font-size: 0.85rem; color: var(--text-muted); }
+    .file-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+    .file-item.active { background: rgba(16,185,129,0.15); color: var(--primary); font-weight: 600; }
+    .editor-container { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
+    .editor-header { padding: 0.75rem 1rem; border-bottom: 1px solid var(--card-border); display: flex; justify-content: space-between; align-items: center; }
+    .editor-textarea { flex: 1; background: #080c14; color: #e2e8f0; font-family: "Courier New", Courier, monospace; font-size: 0.9rem; padding: 1rem; border: none; resize: none; outline: none; }
+    
+    /* Auth Modal */
+    #authOverlay { position: fixed; inset: 0; background: rgba(5,8,14,0.92); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .auth-card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; padding: 2rem; width: 100%; max-width: 400px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); text-align: center; }
+    .auth-input { width: 100%; padding: 0.75rem 1rem; border-radius: 8px; background: #080c14; border: 1px solid var(--card-border); color: #fff; margin: 1.25rem 0; font-size: 1rem; outline: none; }
+    .auth-input:focus { border-color: var(--primary); }
+    
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- Auth Modal -->
+  <div id="authOverlay">
+    <div class="auth-card">
+      <div class="brand-cube" style="margin: 0 auto 1rem; width: 44px; height: 44px; font-size: 22px;">MC</div>
+      <h2>MC-Droid Host</h2>
+      <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem;">Dedicated Java Server Dashboard</p>
+      <input type="password" id="authPassword" class="auth-input" placeholder="Admin Password" autofocus>
+      <div id="authError" style="color: var(--danger); font-size: 0.85rem; margin-bottom: 0.75rem;" class="hidden"></div>
+      <button class="btn btn-primary" style="width: 100%;" onclick="attemptLogin()">Log In to Dashboard</button>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-cube">MC</div>
+      <span>MC-Droid Host</span>
+    </div>
+    <div class="nav-tabs">
+      <button class="nav-btn active" onclick="switchTab('overview')">Overview</button>
+      <button class="nav-btn" onclick="switchTab('console')">Console</button>
+      <button class="nav-btn" onclick="switchTab('files')">Files</button>
+      <button class="nav-btn" onclick="switchTab('backups')">Backups</button>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <main>
+    <!-- OVERVIEW TAB -->
+    <div id="tab-overview">
+      <div class="grid">
+        <!-- Status Card -->
+        <div class="card">
+          <div class="card-title">Server Status</div>
+          <div class="card-value">
+            <span id="statusBadge" class="status-badge status-stopped">
+              <span class="status-pulse"></span>
+              <span id="statusText">STOPPED</span>
+            </span>
+          </div>
+          <div id="versionSubtitle" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">PaperMC Java Edition</div>
+          <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+            <button id="btnStart" class="btn btn-primary btn-sm" onclick="controlServer('start')">Start</button>
+            <button id="btnRestart" class="btn btn-outline btn-sm" onclick="controlServer('restart')">Restart</button>
+            <button id="btnStop" class="btn btn-danger btn-sm" onclick="controlServer('stop')">Stop</button>
+          </div>
+        </div>
+
+        <!-- Connection Card -->
+        <div class="card">
+          <div class="card-title">Multiplayer Endpoints</div>
+          <div style="margin-bottom: 0.5rem;">
+            <span style="font-size: 0.8rem; color: var(--text-muted);">Local Wi-Fi:</span>
+            <div style="font-family: monospace; font-weight: 700; color: var(--accent);" id="localEndpoint">0.0.0.0:25565</div>
+          </div>
+          <div>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">Playit WAN Public Domain:</span>
+            <div style="font-family: monospace; font-weight: 700; color: var(--primary);" id="playitEndpoint">Waiting for tunnel...</div>
+            <a id="claimBtn" href="#" target="_blank" class="btn btn-outline btn-sm hidden" style="margin-top: 0.5rem; color: var(--warning); border-color: var(--warning);">Claim Tunnel on Playit.gg</a>
+          </div>
+        </div>
+
+        <!-- RAM & Resources Card -->
+        <div class="card">
+          <div class="card-title">JVM & Memory Allocation</div>
+          <div class="card-value" id="ramText">0 MB / 4 GB</div>
+          <div class="progress-bar-bg">
+            <div id="ramFill" class="progress-bar-fill" style="width: 0%;"></div>
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;" id="sysMemText">Phone RAM: Available -- GB</div>
+        </div>
+
+        <!-- Hardware & Thermal Card -->
+        <div class="card">
+          <div class="card-title">Hardware Telemetry (POCO X6 5G)</div>
+          <div class="card-value" id="tempText">
+            <span id="tempValue">-- °C</span>
+            <span id="thermalBadge" class="status-badge" style="font-size: 0.75rem;">NORMAL</span>
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">Emergency shutdown threshold: 45°C (3m)</div>
+        </div>
+      </div>
+
+      <!-- Online Players -->
+      <div class="card">
+        <div class="card-title">Connected Players (<span id="playerCount">0</span> / <span id="maxPlayers">20</span>)</div>
+        <div id="playerList" style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem;">
+          <span style="color: var(--text-muted); font-size: 0.9rem;">No players currently connected.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONSOLE TAB -->
+    <div id="tab-console" class="hidden">
+      <div class="terminal-container">
+        <div class="terminal-header">
+          <span style="font-weight: 600; font-size: 0.9rem; color: var(--text-muted);">Minecraft Java Server Terminal</span>
+          <button class="btn btn-outline btn-sm" onclick="clearTerminal()">Clear</button>
+        </div>
+        <div id="terminalOutput" class="terminal-output"></div>
+        <div class="terminal-input-bar">
+          <input type="text" id="cmdInput" class="terminal-input" placeholder="Type a Minecraft command (e.g. op, say, whitelist, stop)..." onkeydown="if(event.key==='Enter') sendConsoleCommand()">
+          <button class="btn btn-primary btn-sm" onclick="sendConsoleCommand()">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- FILES TAB -->
+    <div id="tab-files" class="hidden">
+      <div class="file-layout">
+        <div class="file-tree" id="fileTreeContainer">
+          <div style="font-weight: 600; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">/sdcard/MinecraftServer/</div>
+          <div id="fileList">Loading...</div>
+        </div>
+        <div class="editor-container">
+          <div class="editor-header">
+            <span id="editingFileName" style="font-weight: 600; font-size: 0.9rem;">Select a file to edit</span>
+            <button id="btnSaveFile" class="btn btn-primary btn-sm hidden" onclick="saveActiveFile()">Save File</button>
+          </div>
+          <textarea id="fileEditor" class="editor-textarea" placeholder="File content will appear here..."></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- BACKUPS TAB -->
+    <div id="tab-backups" class="hidden">
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <h3 style="font-size: 1.1rem;">World Backups & Integrity</h3>
+            <p style="color: var(--text-muted); font-size: 0.85rem;">Captures all dimensions (world, world_nether, world_the_end) with write-suspension.</p>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="triggerBackup()">Create Backup Now</button>
+        </div>
+        <div style="margin-top: 1rem;">
+          <div style="font-size: 0.85rem; color: var(--text-muted);" id="quotaInfo">Storage Quota: 0 MB / 25 GB</div>
+          <div class="progress-bar-bg">
+            <div id="quotaFill" class="progress-bar-fill" style="width: 0%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Available Archives</div>
+        <div id="backupListContainer" style="margin-top: 0.75rem;">Loading archives...</div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let token = localStorage.getItem("mc_token") || "";
+    let activeFile = "";
+    let ws = null;
+
+    if (token) {
+      document.getElementById("authOverlay").classList.add("hidden");
+      startApp();
+    }
+
+    async function attemptLogin() {
+      const pass = document.getElementById("authPassword").value;
+      const errEl = document.getElementById("authError");
+      errEl.classList.add("hidden");
+
+      try {
+        const resp = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: pass })
+        });
+        const data = await resp.json();
+        if (resp.ok && data.token) {
+          token = data.token;
+          localStorage.setItem("mc_token", token);
+          document.getElementById("authOverlay").classList.add("hidden");
+          startApp();
+        } else {
+          errEl.textContent = data.error || "Authentication failed";
+          errEl.classList.remove("hidden");
+        }
+      } catch (e) {
+        errEl.textContent = "Connection error: " + e.message;
+        errEl.classList.remove("hidden");
+      }
+    }
+
+    function startApp() {
+      pollStatus();
+      setInterval(pollStatus, 3000);
+      initWebSocket();
+    }
+
+    function switchTab(tabId) {
+      document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+      event.target.classList.add("active");
+
+      document.querySelectorAll("main > div").forEach(d => d.classList.add("hidden"));
+      document.getElementById("tab-" + tabId).classList.remove("hidden");
+
+      if (tabId === "files") loadFiles("");
+      if (tabId === "backups") loadBackups();
+    }
+
+    async function pollStatus() {
+      if (!token) return;
+      try {
+        const resp = await fetch("/api/status", {
+          headers: { "Authorization": "Bearer " + token }
+        });
+        if (resp.status === 401) {
+          localStorage.removeItem("mc_token");
+          location.reload();
+          return;
+        }
+        const data = await resp.json();
+        updateOverview(data);
+      } catch (e) {
+        console.error("Poll error", e);
+      }
+    }
+
+    function updateOverview(d) {
+      const badge = document.getElementById("statusBadge");
+      const text = document.getElementById("statusText");
+      text.textContent = d.serverStatus;
+
+      badge.className = "status-badge " + (d.serverStatus === "RUNNING" ? "status-running" : "status-stopped");
+      document.getElementById("versionSubtitle").textContent = "PaperMC " + d.selectedVersion + " (Port " + d.port + ")";
+
+      // Endpoints
+      document.getElementById("localEndpoint").textContent = window.location.hostname + ":" + d.port;
+      const playitEl = document.getElementById("playitEndpoint");
+      const claimEl = document.getElementById("claimBtn");
+      if (d.playitAddress) {
+        playitEl.textContent = d.playitAddress;
+        playitEl.style.color = "var(--primary)";
+      } else {
+        playitEl.textContent = "Tunnel offline / resolving...";
+        playitEl.style.color = "var(--text-muted)";
+      }
+      if (d.playitClaimUrl) {
+        claimEl.href = d.playitClaimUrl;
+        claimEl.classList.remove("hidden");
+      } else {
+        claimEl.classList.add("hidden");
+      }
+
+      // RAM
+      document.getElementById("ramText").textContent = d.jvmUsedMb + " MB / " + (d.allocatedRamGb * 1024) + " MB";
+      const ramPct = Math.min(100, Math.round((d.jvmUsedMb / (d.allocatedRamGb * 1024)) * 100));
+      document.getElementById("ramFill").style.width = ramPct + "%";
+      document.getElementById("sysMemText").textContent = "Phone RAM: " + Math.round(d.systemFreeMemMb / 1024) + " GB available of " + Math.round(d.systemTotalMemMb / 1024) + " GB";
+
+      // Hardware & Thermal
+      document.getElementById("tempValue").textContent = d.temperatureC.toFixed(1) + " °C";
+      const thBadge = document.getElementById("thermalBadge");
+      thBadge.textContent = d.thermalLevel;
+      if (d.thermalLevel === "NORMAL") {
+        thBadge.style.background = "rgba(16,185,129,0.2)"; thBadge.style.color = "var(--primary)";
+      } else if (d.thermalLevel === "ELEVATED") {
+        thBadge.style.background = "rgba(245,158,11,0.2)"; thBadge.style.color = "var(--warning)";
+      } else {
+        thBadge.style.background = "rgba(239,68,68,0.2)"; thBadge.style.color = "var(--danger)";
+      }
+
+      // Players
+      document.getElementById("playerCount").textContent = d.onlinePlayers.length;
+      document.getElementById("maxPlayers").textContent = d.maxPlayers;
+      const listEl = document.getElementById("playerList");
+      if (d.onlinePlayers.length === 0) {
+        listEl.innerHTML = '<span style="color: var(--text-muted); font-size: 0.9rem;">No players currently connected.</span>';
+      } else {
+        listEl.innerHTML = d.onlinePlayers.map(p => `
+          <div style="background: rgba(255,255,255,0.06); padding: 0.4rem 0.8rem; border-radius: 8px; display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 600;">
+            <img src="https://mc-heads.net/avatar/${p}/20" style="border-radius: 4px;" alt="">
+            <span>${p}</span>
+          </div>
+        `).join("");
+      }
+    }
+
+    async function controlServer(action) {
+      await fetch("/api/control/" + action, {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ ramGb: 4 })
+      });
+      pollStatus();
+    }
+
+    /* WebSocket Interactive Terminal */
+    function initWebSocket() {
+      const loc = window.location;
+      const wsUrl = (loc.protocol === "https:" ? "wss://" : "ws://") + loc.host + "/ws/console?token=" + encodeURIComponent(token);
+      ws = new WebSocket(wsUrl);
+
+      ws.onmessage = (e) => {
+        const out = document.getElementById("terminalOutput");
+        out.textContent += e.data + "\n";
+        out.scrollTop = out.scrollHeight;
+      };
+
+      ws.onclose = () => {
+        setTimeout(initWebSocket, 4000);
+      };
+    }
+
+    function sendConsoleCommand() {
+      const input = document.getElementById("cmdInput");
+      const cmd = input.value.trim();
+      if (!cmd) return;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(cmd);
+      } else {
+        fetch("/api/console/command", {
+          method: "POST",
+          headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+          body: JSON.stringify({ command: cmd })
+        });
+      }
+      input.value = "";
+    }
+
+    function clearTerminal() {
+      document.getElementById("terminalOutput").textContent = "";
+    }
+
+    /* File Explorer */
+    async function loadFiles(path) {
+      const resp = await fetch("/api/files?path=" + encodeURIComponent(path), {
+        headers: { "Authorization": "Bearer " + token }
+      });
+      const data = await resp.json();
+      const listEl = document.getElementById("fileList");
+      listEl.innerHTML = data.files.map(f => `
+        <div class="file-item" onclick="${f.isDirectory ? `loadFiles('${(data.currentPath ? data.currentPath + '/' : '') + f.name}')` : `openFile('${(data.currentPath ? data.currentPath + '/' : '') + f.name}')`}">
+          <span>${f.isDirectory ? "📁" : "📄"}</span>
+          <span>${f.name}</span>
+        </div>
+      `).join("");
+    }
+
+    async function openFile(filePath) {
+      activeFile = filePath;
+      document.getElementById("editingFileName").textContent = filePath;
+      document.getElementById("btnSaveFile").classList.remove("hidden");
+      const resp = await fetch("/api/files/read?path=" + encodeURIComponent(filePath), {
+        headers: { "Authorization": "Bearer " + token }
+      });
+      document.getElementById("fileEditor").value = await resp.text();
+    }
+
+    async function saveActiveFile() {
+      if (!activeFile) return;
+      const content = document.getElementById("fileEditor").value;
+      await fetch("/api/files/write?path=" + encodeURIComponent(activeFile), {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + token, "Content-Type": "text/plain" },
+        body: content
+      });
+      alert("File saved successfully!");
+    }
+
+    /* Backups */
+    async function loadBackups() {
+      const resp = await fetch("/api/backups", {
+        headers: { "Authorization": "Bearer " + token }
+      });
+      const data = await resp.json();
+      const usedMb = Math.round(data.usedQuotaBytes / 1024 / 1024);
+      const maxMb = Math.round(data.maxQuotaBytes / 1024 / 1024);
+      document.getElementById("quotaInfo").textContent = "Storage Quota: " + usedMb + " MB / " + maxMb + " MB (" + Math.round((usedMb / maxMb) * 100) + "%)";
+      document.getElementById("quotaFill").style.width = Math.min(100, Math.round((usedMb / maxMb) * 100)) + "%";
+
+      const listEl = document.getElementById("backupListContainer");
+      if (data.backups.length === 0) {
+        listEl.innerHTML = '<span style="color: var(--text-muted); font-size: 0.9rem;">No backup archives available.</span>';
+      } else {
+        listEl.innerHTML = data.backups.map(b => `
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 0; border-bottom: 1px solid var(--card-border);">
+            <div>
+              <div style="font-weight: 600; font-size: 0.9rem;">${b.fileName}</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);">${b.formattedDate} • ${Math.round(b.sizeBytes / 1024 / 1024)} MB ${b.isAuto ? '• <span style="color: var(--accent);">Auto-Snapshot</span>' : ''}</div>
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="restoreArchive('${b.fileName}')">Restore</button>
+          </div>
+        `).join("");
+      }
+    }
+
+    async function triggerBackup() {
+      await fetch("/api/backups/create", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + token }
+      });
+      setTimeout(loadBackups, 3000);
+    }
+
+    async function restoreArchive(name) {
+      if (!confirm("Are you sure you want to restore " + name + "? This will overwrite world dimensions (a safety pre-backup will be taken). The server MUST be stopped.")) return;
+      const resp = await fetch("/api/backups/restore", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: name })
+      });
+      const res = await resp.json();
+      alert(res.message);
+    }
+  </script>
+</body>
+</html>
