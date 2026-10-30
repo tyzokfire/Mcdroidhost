@@ -309,9 +309,7 @@ fun MainAppScreen(
                             JdkSetupCard(
                                 jdkState = jdkState,
                                 onInstallJdk = {
-                                    coroutineScope.launch {
-                                        hostService?.jdkManager?.downloadAndInstall()
-                                    }
+                                    hostService?.installJdk()
                                 }
                             )
                         }
@@ -548,12 +546,20 @@ fun JdkSetupCard(
 
             if (jdkState.isDownloading) {
                 Spacer(modifier = Modifier.height(8.dp))
-                LinearProgressIndicator(
-                    progress = { jdkState.downloadProgress },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = CyanAccent,
-                    trackColor = SlateBorder
-                )
+                if (jdkState.downloadProgress > 0f) {
+                    LinearProgressIndicator(
+                        progress = { jdkState.downloadProgress.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = CyanAccent,
+                        trackColor = SlateBorder
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = CyanAccent,
+                        trackColor = SlateBorder
+                    )
+                }
             }
         }
     }
