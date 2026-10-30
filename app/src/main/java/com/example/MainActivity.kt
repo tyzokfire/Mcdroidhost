@@ -503,12 +503,22 @@ fun JdkSetupCard(
                 Button(
                     onClick = onInstallJdk,
                     enabled = !jdkState.isDownloading,
-                    colors = ButtonDefaults.buttonColors(containerColor = CyanAccent, contentColor = Color(0xFF082F49)),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (jdkState.lastError != null) Color(0xFFEF4444) else CyanAccent,
+                        contentColor = if (jdkState.lastError != null) Color.White else Color(0xFF082F49)
+                    ),
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Icon(Icons.Default.Download, contentDescription = "Download", modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (jdkState.isDownloading) "Installing..." else "Install JDK", fontWeight = FontWeight.Bold)
+                    Text(
+                        when {
+                            jdkState.isDownloading -> "Installation..."
+                            jdkState.lastError != null -> "Réessayer"
+                            else -> "Installer JDK"
+                        },
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
 
@@ -517,8 +527,24 @@ fun JdkSetupCard(
             Text(
                 text = jdkState.statusMessage,
                 fontSize = 12.sp,
-                color = TextMuted
+                color = if (jdkState.lastError != null) Color(0xFFFCA5A5) else TextMuted
             )
+
+            if (!jdkState.lastError.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF3F1219), RoundedCornerShape(8.dp))
+                        .padding(10.dp)
+                ) {
+                    Text(
+                        text = "Erreur: ${jdkState.lastError}",
+                        fontSize = 11.sp,
+                        color = Color(0xFFFECACA)
+                    )
+                }
+            }
 
             if (jdkState.isDownloading) {
                 Spacer(modifier = Modifier.height(8.dp))
