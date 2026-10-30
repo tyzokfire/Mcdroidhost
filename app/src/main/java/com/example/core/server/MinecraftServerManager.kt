@@ -272,7 +272,12 @@ class MinecraftServerManager(
                 val env = pb.environment()
                 val libDir = File(jdkManager.runtimeDir, "lib")
                 val jvmDir = File(libDir, "server")
-                env["LD_LIBRARY_PATH"] = "${libDir.absolutePath}:${jvmDir.absolutePath}"
+                val jliDir = File(libDir, "jli")
+                val ldPaths = listOf(libDir.absolutePath, jvmDir.absolutePath, jliDir.absolutePath)
+                    .filter { File(it).exists() }
+                env["LD_LIBRARY_PATH"] = ldPaths.joinToString(":")
+                env["JAVA_HOME"] = jdkManager.runtimeDir.absolutePath
+                env["PATH"] = "${jdkManager.binDir.absolutePath}:${System.getenv("PATH") ?: "/system/bin"}"
                 env["HOME"] = context.filesDir.absolutePath
                 pb.redirectErrorStream(true)
 
