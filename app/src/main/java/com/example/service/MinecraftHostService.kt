@@ -154,6 +154,12 @@ class MinecraftHostService : Service() {
         playitManager.startTunnel()
     }
 
+    fun installJdk() {
+        serviceScope.launch(Dispatchers.IO) {
+            jdkManager.downloadAndInstall()
+        }
+    }
+
     private fun acquireWakeAndWifiLocks() {
         try {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
