@@ -18,6 +18,7 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.RandomAccessFile
 import java.security.MessageDigest
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 
 data class JdkState(
@@ -35,7 +36,6 @@ class JdkManager(private val context: Context) {
     companion object {
         private const val TAG = "JdkManager"
 
-        // Known stable OpenJDK 21 ARM64 Bionic build mirrors (PojavLauncher / Termux packages)
         const val DEFAULT_JDK_URL =
             "https://github.com/PojavLauncherTeam/android-openjdk-build-multiarch/releases/download/jre21-20240116/jre21-arm64-20240116-release.tar.xz"
         const val BACKUP_JDK_URL =
@@ -45,7 +45,12 @@ class JdkManager(private val context: Context) {
     private val _state = MutableStateFlow(JdkState())
     val state: StateFlow<JdkState> = _state.asStateFlow()
 
-    private val httpClient = OkHttpClient.Builder().build()
+    private val httpClient = OkHttpClient.Builder()
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .build()
 
     val runtimeDir: File
         get() = File(context.filesDir, "runtime")
@@ -57,12 +62,12 @@ class JdkManager(private val context: Context) {
         get() = File(binDir, "java")
 
     suspend fun checkInstallation(): Boolean = withContext(Dispatchers.IO) {
+        normalizeRuntimeStructure(runtimeDir)
         if (!javaExecutable.exists()) {
             _state.value = JdkState(isInstalled = false, statusMessage = "OpenJDK 21 not found")
             return@withContext false
         }
 
-        // Validate execution with java -version
         val result = testJavaVersion()
         if (result.first) {
             _state.value = JdkState(
@@ -92,33 +97,39 @@ class JdkManager(private val context: Context) {
             lastError = null
         )
 
-        val archiveFile = File(context.cacheDir, "openjdk-runtime.archive")
+        val ext = if (downloadUrl.contains(".tar.gz")) ".tar.gz" else ".tar.xz"
+        val archiveFile = File(context.cacheDir, "openjdk-runtime$ext")
 
         try {
-            // 1. Download with HTTP Range resumption support
+            // 1. Téléchargement
             downloadFileWithResume(downloadUrl, archiveFile)
 
-            // 2. Validate SHA-256 if provided
+            // 2. Vérification d'intégrité facultative
             if (!expectedSha256.isNullOrBlank()) {
                 _state.value = _state.value.copy(statusMessage = "Verifying archive integrity (SHA-256)...")
                 val actualSha256 = computeSha256(archiveFile)
                 if (!actualSha256.equals(expectedSha256, ignoreCase = true)) {
-                    throw IllegalStateException("SHA-256 mismatch! Expected $expectedSha256 but got $actualSha256")
+                    throw IllegalStateException("SHA-256 mismatch! Expected $expectedSha256 but got$actualSha256")
                 }
             }
 
-            // 3. Extract into runtime directory
+            // 3. Extraction
             _state.value = _state.value.copy(statusMessage = "Extracting OpenJDK 21...")
+            runtimeDir.deleteRecursively()
+            runtimeDir.mkdirs()
             extractArchive(archiveFile, runtimeDir)
 
-            // 4. Ensure permissions (chmod 755 on binaries and libraries)
+            // 4. Aplatir le dossier si l'archive contenait un sous-dossier racine
+            normalizeRuntimeStructure(runtimeDir)
+
+            // 5. Appliquer les droits d'exécution
             _state.value = _state.value.copy(statusMessage = "Applying execution permissions...")
             applyExecPermissions(runtimeDir)
 
-            // 5. Clean cache archive
+            // Nettoyage de l'archive du cache
             archiveFile.delete()
 
-            // 6. Test execution
+            // 6. Test d'exécution
             _state.value = _state.value.copy(statusMessage = "Verifying java -version...")
             val (ok, versionOutput) = testJavaVersion()
             if (ok) {
@@ -155,7 +166,7 @@ class JdkManager(private val context: Context) {
 
         httpClient.newCall(requestBuilder.build()).execute().use { response ->
             if (!response.isSuccessful && response.code != 416) {
-                throw IllegalStateException("Download failed with HTTP ${response.code}: ${response.message}")
+                throw IllegalStateException("Download failed with HTTP ${response.code}:${response.message}")
             }
 
             val body = response.body ?: throw IllegalStateException("Empty response body")
@@ -169,7 +180,7 @@ class JdkManager(private val context: Context) {
                 randomAccessFile.setLength(0)
             }
 
-            val buffer = ByteArray(32 * 1024)
+            val buffer = ByteArray(64 * 1024)
             var bytesRead: Int
             var currentDownloaded = if (response.code == 206) existingBytes else 0L
             val inputStream = body.byteStream()
@@ -183,7 +194,7 @@ class JdkManager(private val context: Context) {
                     downloadProgress = progress,
                     downloadedBytes = currentDownloaded,
                     totalBytes = totalBytes,
-                    statusMessage = "Downloading OpenJDK: ${(progress * 100).toInt()}% (${currentDownloaded / 1024 / 1024} MB)"
+                    statusMessage = "Downloading OpenJDK: ${(progress * 100).toInt()}\% (${currentDownloaded / 1024 / 1024} MB)"
                 )
             }
             randomAccessFile.close()
@@ -211,7 +222,6 @@ class JdkManager(private val context: Context) {
             name.endsWith(".tar.gz") || name.endsWith(".tgz") -> extractTarGz(archiveFile, targetDir)
             name.endsWith(".zip") -> extractZip(archiveFile, targetDir)
             else -> {
-                // Try tar.xz first, fallback to tar.gz, then zip
                 try {
                     extractTarXz(archiveFile, targetDir)
                 } catch (_: Exception) {
@@ -246,7 +256,6 @@ class JdkManager(private val context: Context) {
             var entry = tarIn.nextTarEntry
             while (entry != null) {
                 val outFile = File(targetDir, entry.name)
-                // Zip-slip / Tar-slip protection
                 if (!outFile.canonicalPath.startsWith(targetDir.canonicalPath)) {
                     throw SecurityException("Arbitrary file write attempt detected: ${entry.name}")
                 }
@@ -286,6 +295,27 @@ class JdkManager(private val context: Context) {
         }
     }
 
+    /**
+     * Remonte le contenu si l'archive a été extraite dans un sous-dossier unique (ex: runtime/jre-21/bin -> runtime/bin)
+     */
+    private fun normalizeRuntimeStructure(dir: File) {
+        if (!dir.exists()) return
+        if (File(dir, "bin/java").exists()) return
+
+        val subDirs = dir.listFiles { f -> f.isDirectory } ?: return
+        for (sub in subDirs) {
+            val nestedBin = File(sub, "bin/java")
+            if (nestedBin.exists()) {
+                sub.listFiles()?.forEach { item ->
+                    val dest = File(dir, item.name)
+                    item.renameTo(dest)
+                }
+                sub.deleteRecursively()
+                break
+            }
+        }
+    }
+
     fun applyExecPermissions(dir: File) {
         dir.walkTopDown().forEach { file ->
             if (file.isFile) {
@@ -309,16 +339,4 @@ class JdkManager(private val context: Context) {
             env["HOME"] = context.filesDir.absolutePath
 
             pb.redirectErrorStream(true)
-            val process = pb.start()
-            val output = process.inputStream.bufferedReader().readText()
-            val exitCode = process.waitFor()
-            if (exitCode == 0 || output.contains("version", ignoreCase = true) || output.contains("OpenJDK", ignoreCase = true)) {
-                Pair(true, output.lines().firstOrNull() ?: output.take(100))
-            } else {
-                Pair(false, "Exit code $exitCode: $output")
-            }
-        } catch (e: Exception) {
-            Pair(false, e.message ?: e.toString())
-        }
-    }
-}
+            
