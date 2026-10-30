@@ -137,12 +137,20 @@ fun ServerStatusCard(
 
             if (serverState.status == ServerStatus.DOWNLOADING_ENGINE) {
                 Spacer(modifier = Modifier.height(8.dp))
-                LinearProgressIndicator(
-                    progress = { serverState.engineDownloadProgress },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = EmeraldPrimary,
-                    trackColor = SlateBorder
-                )
+                if (serverState.engineDownloadProgress > 0f) {
+                    LinearProgressIndicator(
+                        progress = { serverState.engineDownloadProgress.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = EmeraldPrimary,
+                        trackColor = SlateBorder
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = EmeraldPrimary,
+                        trackColor = SlateBorder
+                    )
+                }
                 Text(
                     text = serverState.statusMessage,
                     fontSize = 12.sp,
