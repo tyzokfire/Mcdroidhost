@@ -101,35 +101,28 @@ class JdkManager(private val context: Context) {
         val archiveFile = File(context.cacheDir, "openjdk-runtime$ext")
 
         try {
-            // 1. Téléchargement
             downloadFileWithResume(downloadUrl, archiveFile)
 
-            // 2. Vérification d'intégrité facultative
             if (!expectedSha256.isNullOrBlank()) {
                 _state.value = _state.value.copy(statusMessage = "Verifying archive integrity (SHA-256)...")
                 val actualSha256 = computeSha256(archiveFile)
                 if (!actualSha256.equals(expectedSha256, ignoreCase = true)) {
-                    throw IllegalStateException("SHA-256 mismatch! Expected $expectedSha256 but got$actualSha256")
+                    throw IllegalStateException("SHA-256 mismatch! Expected $expectedSha256 but got $actualSha256")
                 }
             }
 
-            // 3. Extraction
             _state.value = _state.value.copy(statusMessage = "Extracting OpenJDK 21...")
             runtimeDir.deleteRecursively()
             runtimeDir.mkdirs()
             extractArchive(archiveFile, runtimeDir)
 
-            // 4. Aplatir le dossier si l'archive contenait un sous-dossier racine
             normalizeRuntimeStructure(runtimeDir)
 
-            // 5. Appliquer les droits d'exécution
             _state.value = _state.value.copy(statusMessage = "Applying execution permissions...")
             applyExecPermissions(runtimeDir)
 
-            // Nettoyage de l'archive du cache
             archiveFile.delete()
 
-            // 6. Test d'exécution
             _state.value = _state.value.copy(statusMessage = "Verifying java -version...")
             val (ok, versionOutput) = testJavaVersion()
             if (ok) {
@@ -166,7 +159,7 @@ class JdkManager(private val context: Context) {
 
         httpClient.newCall(requestBuilder.build()).execute().use { response ->
             if (!response.isSuccessful && response.code != 416) {
-                throw IllegalStateException("Download failed with HTTP ${response.code}:${response.message}")
+                throw IllegalStateException("Download failed with HTTP ${response.code}: ${response.message}")
             }
 
             val body = response.body ?: throw IllegalStateException("Empty response body")
@@ -190,11 +183,12 @@ class JdkManager(private val context: Context) {
                 currentDownloaded += bytesRead
 
                 val progress = if (totalBytes > 0) currentDownloaded.toFloat() / totalBytes else 0f
+                val mbDownloaded = currentDownloaded / (1024 * 1024)
                 _state.value = _state.value.copy(
                     downloadProgress = progress,
                     downloadedBytes = currentDownloaded,
                     totalBytes = totalBytes,
-                    statusMessage = "Downloading OpenJDK: ${(progress * 100).toInt()}\% (${currentDownloaded / 1024 / 1024} MB)"
+                    statusMessage = "Downloading OpenJDK: ${(progress * 100).toInt()}% ($mbDownloaded MB)"
                 )
             }
             randomAccessFile.close()
@@ -295,9 +289,6 @@ class JdkManager(private val context: Context) {
         }
     }
 
-    /**
-     * Remonte le contenu si l'archive a été extraite dans un sous-dossier unique (ex: runtime/jre-21/bin -> runtime/bin)
-     */
     private fun normalizeRuntimeStructure(dir: File) {
         if (!dir.exists()) return
         if (File(dir, "bin/java").exists()) return
@@ -339,4 +330,16 @@ class JdkManager(private val context: Context) {
             env["HOME"] = context.filesDir.absolutePath
 
             pb.redirectErrorStream(true)
-            
+            val process = pb.start()
+            val output = process.inputStream.bufferedReader().readText()
+            val exitCode = process.waitFor()
+            if (exitCode == 0 || output.contains("version", ignoreCase = true) || output.contains("openjdk", ignoreCase = true)) {
+                Pair(true, output.lines().firstOrNull() ?: output.take(100))
+            } else {
+                Pair(false, "Exit code $exitCode: $output")
+            }
+        } catch (e: Exception) {
+            Pair(false, e.message ?: e.toString())
+        }
+    }
+}
