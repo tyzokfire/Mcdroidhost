@@ -18,6 +18,7 @@ import io.ktor.server.engine.ApplicationEngine
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.cors.routing.CORS
 import io.ktor.server.request.header
+import io.ktor.server.request.receive
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
@@ -185,6 +186,10 @@ class KtorWebServer(
                                     serverManager.restartServer()
                                     call.respondText(JSONObject().put("result", "restarting").toString(), ContentType.Application.Json)
                                 }
+                                "delete" -> {
+                                    val ok = serverManager.deleteServerFiles()
+                                    call.respondText(JSONObject().put("result", if (ok) "deleted" else "failed").toString(), ContentType.Application.Json)
+                                }
                                 else -> call.respond(HttpStatusCode.BadRequest, "Invalid action")
                             }
                         }
@@ -287,6 +292,66 @@ class KtorWebServer(
                             call.respondText(JSONObject().put("status", "saved").toString(), ContentType.Application.Json)
                         }
 
+                        // File explorer - Delete file/directory with Path Traversal Protection
+                        post("/api/files/delete") {
+                            if (!isAuthorized(call.request.header("Authorization"))) {
+                                call.respond(HttpStatusCode.Unauthorized, "Unauthorized")
+                                return@post
+                            }
+                            val subPath = call.request.queryParameters["path"] ?: ""
+                            val baseDir = serverManager.serverDirectory.canonicalFile
+                            val targetFile = File(baseDir, subPath).canonicalFile
+
+                            if (!targetFile.path.startsWith(baseDir.path) || targetFile == baseDir) {
+                                call.respond(HttpStatusCode.Forbidden, "Access Denied: Path Traversal or Root Deletion Detected")
+                                return@post
+                            }
+
+                            val ok = targetFile.deleteRecursively()
+                            call.respondText(JSONObject().put("success", ok).toString(), ContentType.Application.Json)
+                        }
+
+                        // Plugins Management
+                        get("/api/plugins") {
+                            if (!isAuthorized(call.request.header("Authorization"))) {
+                                call.respond(HttpStatusCode.Unauthorized, "Unauthorized")
+                                return@get
+                            }
+                            val plugins = serverManager.listPlugins().map { f ->
+                                JSONObject()
+                                    .put("name", f.name)
+                                    .put("sizeBytes", f.length())
+                                    .put("modified", f.lastModified())
+                            }
+                            call.respondText(JSONObject().put("plugins", JSONArray(plugins)).toString(), ContentType.Application.Json)
+                        }
+
+                        post("/api/plugins/delete") {
+                            if (!isAuthorized(call.request.header("Authorization"))) {
+                                call.respond(HttpStatusCode.Unauthorized, "Unauthorized")
+                                return@post
+                            }
+                            val json = JSONObject(call.receiveText())
+                            val name = json.optString("name", "")
+                            val ok = serverManager.deletePlugin(name)
+                            call.respondText(JSONObject().put("success", ok).toString(), ContentType.Application.Json)
+                        }
+
+                        post("/api/plugins/upload") {
+                            if (!isAuthorized(call.request.header("Authorization"))) {
+                                call.respond(HttpStatusCode.Unauthorized, "Unauthorized")
+                                return@post
+                            }
+                            val pluginName = call.request.header("X-Plugin-Name") ?: "plugin_${System.currentTimeMillis()}.jar"
+                            val bytes = call.receive<ByteArray>()
+                            if (bytes.isEmpty()) {
+                                call.respond(HttpStatusCode.BadRequest, "Empty file")
+                                return@post
+                            }
+                            val ok = serverManager.installPlugin(bytes.inputStream(), pluginName)
+                            call.respondText(JSONObject().put("success", ok).toString(), ContentType.Application.Json)
+                        }
+
                         // Backups endpoints
                         get("/api/backups") {
                             if (!isAuthorized(call.request.header("Authorization"))) {
@@ -331,6 +396,17 @@ class KtorWebServer(
                             val fileName = json.optString("fileName", "")
                             val (ok, msg) = backupManager.restoreBackup(fileName)
                             call.respondText(JSONObject().put("success", ok).put("message", msg).toString(), ContentType.Application.Json)
+                        }
+
+                        post("/api/backups/delete") {
+                            if (!isAuthorized(call.request.header("Authorization"))) {
+                                call.respond(HttpStatusCode.Unauthorized, "Unauthorized")
+                                return@post
+                            }
+                            val json = JSONObject(call.receiveText())
+                            val fileName = json.optString("fileName", "")
+                            val ok = backupManager.deleteBackup(fileName)
+                            call.respondText(JSONObject().put("success", ok).toString(), ContentType.Application.Json)
                         }
 
                         // WebSocket interactive streaming console

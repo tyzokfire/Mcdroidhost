@@ -51,9 +51,16 @@ class PlayitTunnelManager(
     private var shouldAutoRestart = true
 
     val playitExecutable: File
-        get() = File(context.filesDir, "runtime/bin/playit")
+        get() {
+            val nativePlayit = File(context.applicationInfo.nativeLibraryDir, "libplayit.so")
+            return if (nativePlayit.exists() && nativePlayit.canExecute()) {
+                nativePlayit
+            } else {
+                File(context.filesDir, "runtime/bin/playit")
+            }
+        }
 
-    fun isInstalled(): Boolean = playitExecutable.exists() && playitExecutable.canExecute()
+    fun isInstalled(): Boolean = playitExecutable.exists()
 
     suspend fun downloadBinary(): Boolean = withContext(Dispatchers.IO) {
         try {

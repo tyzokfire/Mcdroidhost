@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
@@ -72,6 +73,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -89,6 +91,7 @@ import com.example.ui.components.BackupsView
 import com.example.ui.components.ConsoleView
 import com.example.ui.components.HardwareTelemetryCard
 import com.example.ui.components.NetworkEndpointsCard
+import com.example.ui.components.PluginsView
 import com.example.ui.components.ServerStatusCard
 import com.example.ui.components.StoragePermissionBanner
 import com.example.ui.components.WebDashboardCard
@@ -203,7 +206,11 @@ fun MainAppScreen(
     }
 
     val hasStoragePermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        Environment.isExternalStorageManager()
+        try {
+            Environment.isExternalStorageManager()
+        } catch (_: Throwable) {
+            false
+        }
     } else {
         true
     }
@@ -280,6 +287,20 @@ fun MainAppScreen(
                     ),
                     modifier = Modifier.testTag("nav_tab_backups")
                 )
+                NavigationBarItem(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
+                    icon = { Icon(Icons.Default.Extension, contentDescription = "Plugins") },
+                    label = { Text("Plugins") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = EmeraldPrimary,
+                        selectedTextColor = EmeraldPrimary,
+                        unselectedIconColor = TextMuted,
+                        unselectedTextColor = TextMuted,
+                        indicatorColor = Color(0xFF16252F)
+                    ),
+                    modifier = Modifier.testTag("nav_tab_plugins")
+                )
             }
         }
     ) { innerPadding ->
@@ -315,22 +336,64 @@ fun MainAppScreen(
                         }
 
                         // Server Status Card
+                        val context = LocalContext.current
                         ServerStatusCard(
                             serverState = serverState,
                             onStart = { ramGb ->
-                                hostService?.startServerAndTunnel(ramGb)
+                                Toast.makeText(context, "Démarrage du serveur...", Toast.LENGTH_SHORT).show()
+                                val activeService = hostService ?: MinecraftHostService.instance
+                                if (activeService != null) {
+                                    activeService.startServerAndTunnel(ramGb)
+                                } else {
+                                    val intent = Intent(context, MinecraftHostService::class.java).apply {
+                                        action = MinecraftHostService.ACTION_START_SERVER
+                                        putExtra("ramGb", ramGb)
+                                    }
+                                    ContextCompat.startForegroundService(context, intent)
+                                }
                             },
                             onStop = {
-                                hostService?.serverManager?.stopServer()
-                                hostService?.playitManager?.stopTunnel()
+                                val activeService = hostService ?: MinecraftHostService.instance
+                                if (activeService != null) {
+                                    activeService.serverManager.stopServer()
+                                    activeService.playitManager.stopTunnel()
+                                } else {
+                                    val intent = Intent(context, MinecraftHostService::class.java).apply {
+                                        action = MinecraftHostService.ACTION_STOP_SERVER
+                                    }
+                                    ContextCompat.startForegroundService(context, intent)
+                                }
                             },
                             onRestart = {
-                                hostService?.serverManager?.restartServer()
+                                val activeService = hostService ?: MinecraftHostService.instance
+                                if (activeService != null) {
+                                    activeService.serverManager.restartServer()
+                                } else {
+                                    val intent = Intent(context, MinecraftHostService::class.java).apply {
+                                        action = MinecraftHostService.ACTION_RESTART_SERVER
+                                    }
+                                    ContextCompat.startForegroundService(context, intent)
+                                }
                             },
                             onSelectVersion = { version ->
                                 coroutineScope.launch {
-                                    hostService?.serverManager?.downloadPaperJar(version)
+                                    val activeService = hostService ?: MinecraftHostService.instance
+                                    activeService?.serverManager?.downloadPaperJar(version)
                                 }
+                            },
+                            onDeleteServer = {
+                                val activeService = hostService ?: MinecraftHostService.instance
+                                val ok = activeService?.deleteServer() ?: false
+                                if (ok) {
+                                    Toast.makeText(context, "Serveur supprimé avec succès", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Erreur lors de la suppression", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onRunDiagnostics = {
+                                val activeService = hostService ?: MinecraftHostService.instance
+                                activeService?.runDiagnostics()
+                                selectedTab = 1
                             }
                         )
 
@@ -382,7 +445,19 @@ fun MainAppScreen(
                             coroutineScope.launch {
                                 hostService?.backupManager?.restoreBackup(fileName)
                             }
+                        },
+                        onDeleteBackup = { fileName ->
+                            coroutineScope.launch {
+                                hostService?.backupManager?.deleteBackup(fileName)
+                            }
                         }
+                    )
+                }
+
+                3 -> {
+                    // Plugins View
+                    PluginsView(
+                        serverManager = hostService?.serverManager
                     )
                 }
             }

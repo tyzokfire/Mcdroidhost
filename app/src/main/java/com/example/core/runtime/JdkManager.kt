@@ -48,7 +48,16 @@ class JdkManager(private val context: Context) {
 
     val runtimeDir: File = File(context.filesDir, "runtime")
     val binDir: File = File(runtimeDir, "bin")
-    val javaExecutable: File = File(binDir, "java")
+
+    val javaExecutable: File
+        get() {
+            val nativeLauncher = File(context.applicationInfo.nativeLibraryDir, "libjava_launcher.so")
+            return if (nativeLauncher.exists() && nativeLauncher.canExecute()) {
+                nativeLauncher
+            } else {
+                File(binDir, "java")
+            }
+        }
 
     private val _state = MutableStateFlow(JdkState())
     val state: StateFlow<JdkState> = _state.asStateFlow()
@@ -65,24 +74,21 @@ class JdkManager(private val context: Context) {
     }
 
     /**
-     * Checks if the OpenJDK binary exists and is executable.
+     * Checks if the OpenJDK binary and core runtime libraries exist.
      */
     fun checkInstallation(): Boolean {
-        if (javaExecutable.exists()) {
-            if (!javaExecutable.canExecute()) {
-                applyExecPermissions(runtimeDir)
-            }
-            val canRun = javaExecutable.canExecute() || javaExecutable.exists()
-            if (canRun) {
-                _state.value = _state.value.copy(
-                    isInstalled = true,
-                    isDownloading = false,
-                    downloadProgress = 1f,
-                    statusMessage = "OpenJDK 21 prêt",
-                    lastError = null
-                )
-                return true
-            }
+        val libJvm = File(runtimeDir, "lib/server/libjvm.so")
+        val isReady = javaExecutable.exists() && libJvm.exists()
+        if (isReady) {
+            applyExecPermissions(runtimeDir)
+            _state.value = _state.value.copy(
+                isInstalled = true,
+                isDownloading = false,
+                downloadProgress = 1f,
+                statusMessage = "OpenJDK 21 prêt",
+                lastError = null
+            )
+            return true
         }
 
         _state.value = _state.value.copy(
@@ -352,7 +358,8 @@ class JdkManager(private val context: Context) {
      * move all files from the subfolder to the top of runtimeDir so bin/java is found.
      */
     private fun normalizeJdkDirectory() {
-        if (javaExecutable.exists()) return
+        val libJvm = File(runtimeDir, "lib/server/libjvm.so")
+        if (File(binDir, "java").exists() && libJvm.exists()) return
 
         // Look for any 'bin/java' in subdirectories
         val javaBinCandidates = runtimeDir.walkTopDown().filter {
@@ -367,9 +374,15 @@ class JdkManager(private val context: Context) {
                 jreRoot.listFiles()?.forEach { file ->
                     val dest = File(runtimeDir, file.name)
                     if (dest.exists()) dest.deleteRecursively()
-                    file.renameTo(dest)
+                    val ok = file.renameTo(dest)
+                    if (!ok) {
+                        file.copyRecursively(dest, overwrite = true)
+                        file.deleteRecursively()
+                    }
                 }
-                jreRoot.deleteRecursively()
+                if (jreRoot.exists() && jreRoot != runtimeDir) {
+                    jreRoot.deleteRecursively()
+                }
             }
         }
     }

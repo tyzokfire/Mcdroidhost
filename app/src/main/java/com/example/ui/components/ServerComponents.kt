@@ -29,10 +29,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -86,10 +91,13 @@ fun ServerStatusCard(
     onStart: (Int) -> Unit,
     onStop: () -> Unit,
     onRestart: () -> Unit,
-    onSelectVersion: (String) -> Unit
+    onSelectVersion: (String) -> Unit,
+    onDeleteServer: () -> Unit,
+    onRunDiagnostics: () -> Unit = {}
 ) {
     var ramAllocation by remember { mutableFloatStateOf(serverState.allocatedRamGb.toFloat()) }
     var showRamWarningDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
@@ -129,7 +137,7 @@ fun ServerStatusCard(
 
             // Version Info & Download Progress
             Text(
-                text = "Target Version: Paper ${serverState.selectedVersion} (Port ${serverState.port})",
+                text = "Version cible: Paper ${serverState.selectedVersion} (Port ${serverState.port})",
                 fontSize = 13.sp,
                 color = CyanAccent,
                 fontWeight = FontWeight.Medium
@@ -167,13 +175,13 @@ fun ServerStatusCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = "Allocated RAM: ${ramAllocation.toInt()} GB",
+                    text = "RAM allouée: ${ramAllocation.toInt()} Go",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = TextPrimary
                 )
                 Text(
-                    text = if (ramAllocation > 6f) "High Load Warning" else "Recommended (4–6 GB)",
+                    text = if (ramAllocation > 6f) "Charge élevée" else "Recommandé (4–6 Go)",
                     fontSize = 12.sp,
                     color = if (ramAllocation > 6f) AmberWarning else TextMuted
                 )
@@ -218,7 +226,7 @@ fun ServerStatusCard(
                         .height(46.dp)
                         .testTag("start_server_button")
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = "Start", modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.PlayArrow, contentDescription = "Démarrer", modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(text = "Start", fontWeight = FontWeight.Bold)
                 }
@@ -234,7 +242,7 @@ fun ServerStatusCard(
                         .height(46.dp)
                         .testTag("restart_server_button")
                 ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Restart", modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Refresh, contentDescription = "Redémarrer", modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(text = "Restart", fontWeight = FontWeight.SemiBold)
                 }
@@ -249,12 +257,112 @@ fun ServerStatusCard(
                         .height(46.dp)
                         .testTag("stop_server_button")
                 ) {
-                    Icon(Icons.Default.Stop, contentDescription = "Stop", modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Stop, contentDescription = "Arrêter", modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(text = "Stop", fontWeight = FontWeight.Bold)
                 }
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Server Location & Status Info
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF0B1017), RoundedCornerShape(8.dp))
+                    .border(1.dp, SlateBorder, RoundedCornerShape(8.dp))
+                    .padding(10.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Folder, contentDescription = "Stockage", tint = CyanAccent, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = if (serverState.serverPath.isNotEmpty()) serverState.serverPath else "Stockage: /sdcard/MinecraftServer",
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = TextMuted,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "Statut: ${serverState.statusMessage}",
+                            fontSize = 11.sp,
+                            color = if (serverState.status == ServerStatus.CRASHED) CrimsonDanger else TextMuted
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Diagnostics and Delete Server Actions
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onRunDiagnostics,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanAccent),
+                    border = ButtonDefaults.outlinedButtonBorder.copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(40.dp)
+                        .testTag("run_diagnostics_button")
+                ) {
+                    Icon(Icons.Default.Terminal, contentDescription = "Diagnostic", modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Diagnostic", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+
+                Button(
+                    onClick = { showDeleteDialog = true },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF451A1A), contentColor = CrimsonDanger),
+                    modifier = Modifier
+                        .weight(1.3f)
+                        .height(40.dp)
+                        .testTag("delete_server_button")
+                ) {
+                    Icon(Icons.Default.DeleteForever, contentDescription = "Supprimer le serveur", modifier = Modifier.size(16.dp), tint = CrimsonDanger)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Supprimer le serveur", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = CrimsonDanger)
+                }
+            }
         }
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            icon = { Icon(Icons.Default.DeleteForever, contentDescription = "Supprimer", tint = CrimsonDanger, modifier = Modifier.size(32.dp)) },
+            title = { Text(text = "Supprimer le serveur ?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    text = "Attention : Cette action efface totalement tous les fichiers du serveur (monde 'world', plugins, configurations et paper.jar).\n\nUn serveur vierge et fonctionnel sera regénéré automatiquement au prochain lancement."
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteDialog = false
+                        onDeleteServer()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CrimsonDanger, contentColor = Color.White),
+                    modifier = Modifier.testTag("confirm_delete_server_button")
+                ) {
+                    Text("Supprimer définitivement", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeleteDialog = false },
+                    modifier = Modifier.testTag("cancel_delete_server_button")
+                ) {
+                    Text("Annuler", color = TextMuted)
+                }
+            }
+        )
     }
 
     if (showRamWarningDialog) {

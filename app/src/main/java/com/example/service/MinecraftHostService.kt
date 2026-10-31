@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.Build
@@ -121,7 +122,16 @@ class MinecraftHostService : Service() {
 
         // 3. Setup Notification Channel & Start Foreground
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification("Initializing MC-Droid Host..."))
+        val initialNotification = buildNotification("Initializing MC-Droid Host...")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                initialNotification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, initialNotification)
+        }
 
         // 4. Start Background Monitors
         thermalMonitor.start()
@@ -158,6 +168,14 @@ class MinecraftHostService : Service() {
         serviceScope.launch(Dispatchers.IO) {
             jdkManager.downloadAndInstall()
         }
+    }
+
+    fun deleteServer(): Boolean {
+        return serverManager.deleteServerFiles()
+    }
+
+    fun runDiagnostics() {
+        serverManager.runSystemDiagnostics()
     }
 
     private fun acquireWakeAndWifiLocks() {

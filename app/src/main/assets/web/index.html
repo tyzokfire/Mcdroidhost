@@ -107,6 +107,7 @@
     <div class="nav-tabs">
       <button class="nav-btn active" onclick="switchTab('overview')">Overview</button>
       <button class="nav-btn" onclick="switchTab('console')">Console</button>
+      <button class="nav-btn" onclick="switchTab('plugins')">Plugins</button>
       <button class="nav-btn" onclick="switchTab('files')">Files</button>
       <button class="nav-btn" onclick="switchTab('backups')">Backups</button>
     </div>
@@ -127,10 +128,11 @@
             </span>
           </div>
           <div id="versionSubtitle" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">PaperMC Java Edition</div>
-          <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+          <div style="display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap;">
             <button id="btnStart" class="btn btn-primary btn-sm" onclick="controlServer('start')">Start</button>
             <button id="btnRestart" class="btn btn-outline btn-sm" onclick="controlServer('restart')">Restart</button>
             <button id="btnStop" class="btn btn-danger btn-sm" onclick="controlServer('stop')">Stop</button>
+            <button id="btnDeleteServer" class="btn btn-outline btn-sm" style="color: var(--danger); border-color: var(--danger);" onclick="deleteServerFiles()">Delete Server</button>
           </div>
         </div>
 
@@ -193,6 +195,27 @@
       </div>
     </div>
 
+    <!-- PLUGINS TAB -->
+    <div id="tab-plugins" class="hidden">
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+          <div>
+            <h3 style="font-size: 1.1rem;">Plugin Manager (.jar)</h3>
+            <p style="color: var(--text-muted); font-size: 0.85rem;">Install Paper/Spigot compatible plugins into /sdcard/MinecraftServer/plugins/.</p>
+          </div>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <input type="file" id="pluginFileInput" accept=".jar" style="font-size: 0.85rem; color: var(--text-muted);">
+            <button class="btn btn-primary btn-sm" onclick="uploadPlugin()">Upload Plugin</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Installed Plugins</div>
+        <div id="pluginListContainer" style="margin-top: 0.75rem;">Loading plugins...</div>
+      </div>
+    </div>
+
     <!-- FILES TAB -->
     <div id="tab-files" class="hidden">
       <div class="file-layout">
@@ -203,7 +226,10 @@
         <div class="editor-container">
           <div class="editor-header">
             <span id="editingFileName" style="font-weight: 600; font-size: 0.9rem;">Select a file to edit</span>
-            <button id="btnSaveFile" class="btn btn-primary btn-sm hidden" onclick="saveActiveFile()">Save File</button>
+            <div style="display: flex; gap: 0.5rem;">
+              <button id="btnSaveFile" class="btn btn-primary btn-sm hidden" onclick="saveActiveFile()">Save File</button>
+              <button id="btnDeleteFile" class="btn btn-danger btn-sm hidden" onclick="deleteActiveFile()">Delete File</button>
+            </div>
           </div>
           <textarea id="fileEditor" class="editor-textarea" placeholder="File content will appear here..."></textarea>
         </div>
@@ -285,6 +311,7 @@
       document.querySelectorAll("main > div").forEach(d => d.classList.add("hidden"));
       document.getElementById("tab-" + tabId).classList.remove("hidden");
 
+      if (tabId === "plugins") loadPlugins();
       if (tabId === "files") loadFiles("");
       if (tabId === "backups") loadBackups();
     }
@@ -376,6 +403,17 @@
       pollStatus();
     }
 
+    async function deleteServerFiles() {
+      if (!confirm("ATTENTION : Voulez-vous vraiment TOTALEMENT supprimer le serveur Minecraft et tous ses fichiers (mondes, plugins, configs) ? Cette action est irréversible !")) return;
+      const resp = await fetch("/api/control/delete", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" }
+      });
+      const data = await resp.json();
+      alert("Résultat: " + data.result);
+      pollStatus();
+    }
+
     /* WebSocket Interactive Terminal */
     function initWebSocket() {
       const loc = window.location;
@@ -432,6 +470,7 @@
       activeFile = filePath;
       document.getElementById("editingFileName").textContent = filePath;
       document.getElementById("btnSaveFile").classList.remove("hidden");
+      document.getElementById("btnDeleteFile").classList.remove("hidden");
       const resp = await fetch("/api/files/read?path=" + encodeURIComponent(filePath), {
         headers: { "Authorization": "Bearer " + token }
       });
@@ -447,6 +486,96 @@
         body: content
       });
       alert("File saved successfully!");
+    }
+
+    async function deleteActiveFile() {
+      if (!activeFile) return;
+      if (!confirm("Are you sure you want to delete " + activeFile + "?")) return;
+      const resp = await fetch("/api/files/delete?path=" + encodeURIComponent(activeFile), {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + token }
+      });
+      const data = await resp.json();
+      if (data.success) {
+        alert("File deleted.");
+        activeFile = "";
+        document.getElementById("editingFileName").textContent = "Select a file to edit";
+        document.getElementById("fileEditor").value = "";
+        document.getElementById("btnSaveFile").classList.add("hidden");
+        document.getElementById("btnDeleteFile").classList.add("hidden");
+        loadFiles("");
+      } else {
+        alert("Failed to delete file.");
+      }
+    }
+
+    /* Plugins */
+    async function loadPlugins() {
+      const resp = await fetch("/api/plugins", {
+        headers: { "Authorization": "Bearer " + token }
+      });
+      const data = await resp.json();
+      const listEl = document.getElementById("pluginListContainer");
+      if (!data.plugins || data.plugins.length === 0) {
+        listEl.innerHTML = '<span style="color: var(--text-muted); font-size: 0.9rem;">No plugins installed in /plugins.</span>';
+      } else {
+        listEl.innerHTML = data.plugins.map(p => `
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 0; border-bottom: 1px solid var(--card-border);">
+            <div>
+              <div style="font-weight: 600; font-size: 0.9rem; color: #fff;">${p.name}</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);">${Math.round(p.sizeBytes / 1024)} KB</div>
+            </div>
+            <button class="btn btn-danger btn-sm" onclick="deletePlugin('${p.name}')">Delete</button>
+          </div>
+        `).join("");
+      }
+    }
+
+    async function uploadPlugin() {
+      const fileInput = document.getElementById("pluginFileInput");
+      if (!fileInput.files || fileInput.files.length === 0) {
+        alert("Please select a .jar plugin file first.");
+        return;
+      }
+      const file = fileInput.files[0];
+      if (!file.name.endsWith(".jar")) {
+        alert("Only .jar files are supported.");
+        return;
+      }
+
+      const buffer = await file.arrayBuffer();
+      const resp = await fetch("/api/plugins/upload", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + token,
+          "Content-Type": "application/octet-stream",
+          "X-Plugin-Name": file.name
+        },
+        body: buffer
+      });
+      const data = await resp.json();
+      if (data.success) {
+        alert("Plugin " + file.name + " uploaded successfully!");
+        fileInput.value = "";
+        loadPlugins();
+      } else {
+        alert("Failed to upload plugin.");
+      }
+    }
+
+    async function deletePlugin(name) {
+      if (!confirm("Are you sure you want to delete plugin " + name + "?")) return;
+      const resp = await fetch("/api/plugins/delete", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name })
+      });
+      const data = await resp.json();
+      if (data.success) {
+        loadPlugins();
+      } else {
+        alert("Failed to delete plugin.");
+      }
     }
 
     /* Backups */
@@ -470,7 +599,10 @@
               <div style="font-weight: 600; font-size: 0.9rem;">${b.fileName}</div>
               <div style="font-size: 0.8rem; color: var(--text-muted);">${b.formattedDate} • ${Math.round(b.sizeBytes / 1024 / 1024)} MB ${b.isAuto ? '• <span style="color: var(--accent);">Auto-Snapshot</span>' : ''}</div>
             </div>
-            <button class="btn btn-outline btn-sm" onclick="restoreArchive('${b.fileName}')">Restore</button>
+            <div style="display: flex; gap: 0.5rem;">
+              <button class="btn btn-outline btn-sm" onclick="restoreArchive('${b.fileName}')">Restore</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteArchive('${b.fileName}')">Delete</button>
+            </div>
           </div>
         `).join("");
       }
@@ -493,6 +625,21 @@
       });
       const res = await resp.json();
       alert(res.message);
+    }
+
+    async function deleteArchive(name) {
+      if (!confirm("Are you sure you want to delete backup " + name + "? This cannot be undone.")) return;
+      const resp = await fetch("/api/backups/delete", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: name })
+      });
+      const res = await resp.json();
+      if (res.success) {
+        loadBackups();
+      } else {
+        alert("Failed to delete backup.");
+      }
     }
   </script>
 </body>

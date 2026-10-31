@@ -35,9 +35,9 @@ data class BackupState(
     val isBackingUp: Boolean = false,
     val isRestoring: Boolean = false,
     val backupList: List<BackupFileInfo> = emptyList(),
-    val maxQuotaBytes: Long = 25L * 1024 * 1024 * 1024, // Default 25 GB
+    val maxQuotaBytes: Long = 25L * 1024 * 1024 * 1024, // 25 GB default
     val usedQuotaBytes: Long = 0L,
-    val lastBackupStatus: String = "No backup performed yet"
+    val lastBackupStatus: String = "Aucune sauvegarde effectuée pour le moment"
 )
 
 class BackupManager(
@@ -65,7 +65,7 @@ class BackupManager(
     fun startScheduledBackups() {
         refreshBackupList()
 
-        // 60-min recurring timer
+        // 60-minute recurring backup timer
         scheduledJob = scope.launch(Dispatchers.IO) {
             while (isActive) {
                 delay(60 * 60 * 1000L)
@@ -91,33 +91,38 @@ class BackupManager(
         }
     }
 
+    /**
+     * Creates a full world backup with safe disk write pause (save-off/save-all).
+     * Guaranteed to resume world writes (save-on) in finally block under all circumstances.
+     */
     suspend fun createBackup(isAuto: Boolean = false, label: String = "manual"): Boolean = withContext(Dispatchers.IO) {
         if (_state.value.isBackingUp) return@withContext false
 
         _state.value = _state.value.copy(
             isBackingUp = true,
-            lastBackupStatus = "Initiating safe world backup..."
+            lastBackupStatus = "Initiation de la sauvegarde du monde..."
         )
 
+        var isServerRunning = false
         try {
-            val isServerRunning = serverManager.state.value.status == ServerStatus.RUNNING
+            isServerRunning = serverManager.state.value.status == ServerStatus.RUNNING
 
             // 1. Safe flush if server is running
             if (isServerRunning) {
-                serverManager.appendLog("[BACKUP] Pausing world disk writes (save-off & save-all)...")
+                serverManager.appendLog("[BACKUP] Suspension temporaire des écritures disque (save-off & save-all)...")
                 serverManager.sendCommand("save-off")
                 serverManager.sendCommand("save-all flush")
-                delay(2000) // Allow LevelDB/Anvil region cache flush
+                delay(2000) // Allow Anvil region cache flush to settle
             }
 
             // 2. Identify folders to compress
-            val targetFolders = listOf("world", "world_nether", "world_the_end")
+            val targetFolders = listOf("world", "world_nether", "world_the_end", "plugins")
             val serverDir = serverManager.serverDirectory
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val archiveName = "backup_${label}_${timestamp}.zip"
             val archiveFile = File(backupsDirectory, archiveName)
 
-            _state.value = _state.value.copy(lastBackupStatus = "Compressing dimensions to $archiveName...")
+            _state.value = _state.value.copy(lastBackupStatus = "Compression dans $archiveName...")
 
             ZipOutputStream(FileOutputStream(archiveFile)).use { zos ->
                 // Add server.properties
@@ -126,7 +131,7 @@ class BackupManager(
                     addFileToZip(props, "server.properties", zos)
                 }
 
-                // Add dimension folders
+                // Add dimension folders and plugins
                 for (folderName in targetFolders) {
                     val folder = File(serverDir, folderName)
                     if (folder.exists() && folder.isDirectory) {
@@ -135,63 +140,74 @@ class BackupManager(
                 }
             }
 
-            // 3. Resume server disk writes
-            if (isServerRunning) {
-                serverManager.sendCommand("save-on")
-                serverManager.appendLog("[BACKUP] World writes resumed (save-on). Backup complete!")
-            }
-
-            // 4. Enforce quota (FIFO cleanup)
+            // 3. Enforce quota (FIFO cleanup)
             enforceStorageQuota()
             refreshBackupList()
 
+            val sizeMb = archiveFile.length() / (1024 * 1024)
+            val msg = "Sauvegarde réussie : $archiveName (${sizeMb} Mo)"
             _state.value = _state.value.copy(
                 isBackingUp = false,
-                lastBackupStatus = "Backup successful: $archiveName (${archiveFile.length() / 1024 / 1024} MB)"
+                lastBackupStatus = msg
             )
+            serverManager.appendLog("[BACKUP] $msg")
             true
         } catch (e: Exception) {
             Log.e(TAG, "Backup failed", e)
-            if (serverManager.state.value.status == ServerStatus.RUNNING) {
-                serverManager.sendCommand("save-on")
-            }
+            val errMsg = "Échec de la sauvegarde : ${e.message}"
             _state.value = _state.value.copy(
                 isBackingUp = false,
-                lastBackupStatus = "Backup failed: ${e.message}"
+                lastBackupStatus = errMsg
             )
+            serverManager.appendLog("[BACKUP-ERREUR] $errMsg")
             false
+        } finally {
+            // CRITICAL: Always resume server disk writes even on error or cancellation
+            if (isServerRunning) {
+                serverManager.sendCommand("save-on")
+                serverManager.appendLog("[BACKUP] Écritures disque reprises (save-on).")
+            }
         }
     }
 
+    /**
+     * Restores a world backup cleanly. Server must be stopped first.
+     */
     suspend fun restoreBackup(fileName: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         if (serverManager.state.value.status != ServerStatus.STOPPED) {
-            return@withContext Pair(false, "Cannot restore while server is active! Stop the server first.")
+            return@withContext Pair(false, "Impossible de restaurer pendant que le serveur est actif ! Arrêtez le serveur d'abord.")
         }
         if (_state.value.isRestoring) {
-            return@withContext Pair(false, "Restore already in progress.")
+            return@withContext Pair(false, "Une restauration est déjà en cours.")
         }
 
         val archive = File(backupsDirectory, fileName)
         if (!archive.exists()) {
-            return@withContext Pair(false, "Archive $fileName does not exist.")
+            return@withContext Pair(false, "L'archive $fileName est introuvable.")
         }
 
-        _state.value = _state.value.copy(isRestoring = true, lastBackupStatus = "Restoring $fileName...")
+        _state.value = _state.value.copy(isRestoring = true, lastBackupStatus = "Restauration de $fileName...")
 
         try {
-            // Safety: create pre-restore snapshot of current worlds
-            createBackup(isAuto = true, label = "pre_restore_safety")
-
             val serverDir = serverManager.serverDirectory
+
+            // Clean existing world folders prior to restore to avoid mixing corrupted region files
+            val worldFolders = listOf("world", "world_nether", "world_the_end")
+            for (w in worldFolders) {
+                val f = File(serverDir, w)
+                if (f.exists()) {
+                    f.deleteRecursively()
+                }
+            }
 
             // Extract with Zip Slip check
             ZipInputStream(FileInputStream(archive)).use { zis ->
                 var entry: ZipEntry? = zis.nextEntry
                 while (entry != null) {
                     val destFile = File(serverDir, entry.name)
-                    // Security: Verify destination file is inside serverDirectory
+                    // Security: Verify destination file is strictly inside serverDirectory
                     if (!destFile.canonicalPath.startsWith(serverDir.canonicalPath)) {
-                        throw SecurityException("Zip Slip detected in archive: ${entry.name}")
+                        throw SecurityException("Tentative de Zip Slip détectée dans l'archive : ${entry.name}")
                     }
 
                     if (entry.isDirectory) {
@@ -207,18 +223,39 @@ class BackupManager(
                 }
             }
 
+            refreshBackupList()
+            val msg = "Restauration réussie depuis $fileName"
             _state.value = _state.value.copy(
                 isRestoring = false,
-                lastBackupStatus = "Restored $fileName successfully"
+                lastBackupStatus = msg
             )
-            Pair(true, "World restored successfully from $fileName")
+            serverManager.appendLog("[BACKUP-SUCCÈS] $msg")
+            Pair(true, msg)
         } catch (e: Exception) {
             Log.e(TAG, "Restore error", e)
+            val errMsg = "Échec de la restauration : ${e.message}"
             _state.value = _state.value.copy(
                 isRestoring = false,
-                lastBackupStatus = "Restore failed: ${e.message}"
+                lastBackupStatus = errMsg
             )
+            serverManager.appendLog("[BACKUP-ERREUR] $errMsg")
             Pair(false, e.message ?: e.toString())
+        }
+    }
+
+    fun deleteBackup(fileName: String): Boolean {
+        return try {
+            val file = File(backupsDirectory, fileName)
+            if (file.exists() && file.delete()) {
+                refreshBackupList()
+                serverManager.appendLog("[BACKUP] Archive supprimée : $fileName")
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to delete backup $fileName", e)
+            false
         }
     }
 

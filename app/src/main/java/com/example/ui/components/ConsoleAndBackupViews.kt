@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Send
@@ -118,23 +119,37 @@ fun ConsoleView(
                 .border(1.dp, SlateBorder, RoundedCornerShape(8.dp))
                 .padding(10.dp)
         ) {
-            items(logs) { line ->
-                val color = when {
-                    line.contains("[ERROR]", ignoreCase = true) || line.contains("Exception") -> CrimsonDanger
-                    line.contains("[WARN]", ignoreCase = true) -> AmberWarning
-                    line.startsWith("> ") -> CyanAccent
-                    line.contains("joined the game") || line.contains("Done (") -> EmeraldPrimary
-                    else -> Color(0xFFA7F3D0)
+            if (logs.isEmpty()) {
+                item {
+                    Text(
+                        text = "[MC-DROID HOST] Console prête. Lancez le serveur depuis le Dashboard pour suivre l'exécution en temps réel.",
+                        color = TextMuted,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
                 }
+            } else {
+                items(logs) { line ->
+                    val color = when {
+                        line.contains("[ERROR]", ignoreCase = true) || line.contains("[ERREUR]", ignoreCase = true) || line.contains("Exception") -> CrimsonDanger
+                        line.contains("[WARN]", ignoreCase = true) || line.contains("[ATTENTION]", ignoreCase = true) -> AmberWarning
+                        line.contains("[DIAGNOSTIC]", ignoreCase = true) -> CyanAccent
+                        line.contains("[SUCCÈS]", ignoreCase = true) || line.contains("[SUCCESS]", ignoreCase = true) -> EmeraldPrimary
+                        line.contains("joined the game") || line.contains("Done (") -> EmeraldPrimary
+                        line.startsWith("> ") -> Color(0xFF67E8F9)
+                        else -> Color(0xFFA7F3D0)
+                    }
 
-                Text(
-                    text = line,
-                    color = color,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp,
-                    modifier = Modifier.padding(vertical = 1.dp)
-                )
+                    Text(
+                        text = line,
+                        color = color,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp,
+                        modifier = Modifier.padding(vertical = 1.dp)
+                    )
+                }
             }
         }
 
@@ -213,9 +228,11 @@ fun BackupsView(
     backupState: BackupState,
     isServerRunning: Boolean,
     onCreateBackup: () -> Unit,
-    onRestoreBackup: (String) -> Unit
+    onRestoreBackup: (String) -> Unit,
+    onDeleteBackup: (String) -> Unit = {}
 ) {
     var selectedRestoreFile by remember { mutableStateOf<String?>(null) }
+    var selectedDeleteFile by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -353,15 +370,31 @@ fun BackupsView(
                                 )
                             }
 
-                            Button(
-                                onClick = { selectedRestoreFile = file.fileName },
-                                enabled = !isServerRunning && !backupState.isRestoring,
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B), contentColor = CyanAccent),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Icon(Icons.Default.Restore, contentDescription = "Restore", modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Restore", fontSize = 12.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Button(
+                                    onClick = { selectedRestoreFile = file.fileName },
+                                    enabled = !isServerRunning && !backupState.isRestoring,
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E293B), contentColor = CyanAccent),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Restore, contentDescription = "Restore", modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Restore", fontSize = 12.sp)
+                                }
+
+                                Spacer(modifier = Modifier.width(6.dp))
+
+                                IconButton(
+                                    onClick = { selectedDeleteFile = file.fileName },
+                                    enabled = !backupState.isRestoring
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Delete",
+                                        tint = CrimsonDanger,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -392,6 +425,34 @@ fun BackupsView(
             },
             dismissButton = {
                 TextButton(onClick = { selectedRestoreFile = null }) {
+                    Text("Cancel", color = TextMuted)
+                }
+            }
+        )
+    }
+
+    // Delete Confirmation Dialog
+    selectedDeleteFile?.let { fileName ->
+        AlertDialog(
+            onDismissRequest = { selectedDeleteFile = null },
+            icon = { Icon(Icons.Default.Warning, contentDescription = "Warning", tint = CrimsonDanger) },
+            title = { Text("Delete Backup Archive") },
+            text = {
+                Text("Are you sure you want to permanently delete '$fileName'?")
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteBackup(fileName)
+                        selectedDeleteFile = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = CrimsonDanger)
+                ) {
+                    Text("Delete", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectedDeleteFile = null }) {
                     Text("Cancel", color = TextMuted)
                 }
             }

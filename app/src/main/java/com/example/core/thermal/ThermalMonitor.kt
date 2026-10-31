@@ -8,6 +8,7 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.PowerManager
 import android.os.SystemClock
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -22,7 +23,7 @@ enum class ThermalLevel {
     NORMAL,    // < 38°C
     ELEVATED,  // 38°C to 42.9°C
     CRITICAL,  // >= 43°C
-    EMERGENCY  // >= 45°C for > 3 minutes
+    EMERGENCY  // >= 45°C for > 3 continuous minutes
 }
 
 data class ThermalState(
@@ -38,35 +39,46 @@ class ThermalMonitor(
     private val scope: CoroutineScope,
     private val onEmergencyShutdownRequired: () -> Unit
 ) {
+    companion object {
+        private const val TAG = "ThermalMonitor"
+        private const val EMERGENCY_DURATION_MS = 180_000L // 3 continuous minutes
+    }
+
     private val _thermalState = MutableStateFlow(ThermalState())
     val thermalState: StateFlow<ThermalState> = _thermalState.asStateFlow()
 
     private var emergencyStartTimeMs: Long? = null
     private var pollerJob: Job? = null
+    private var lastValidTempC: Float = 32.0f
 
     private val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
 
     private val batteryReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context?, intent: Intent?) {
             if (intent?.action == Intent.ACTION_BATTERY_CHANGED) {
-                val tempRaw = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)
-                val tempC = tempRaw / 10.0f
-                evaluateThermalState(tempC)
+                val tempRaw = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1)
+                processRawTemperature(tempRaw)
             }
         }
     }
 
     fun start() {
         val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-        context.registerReceiver(batteryReceiver, filter)
+        try {
+            context.registerReceiver(batteryReceiver, filter)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed registering battery receiver", e)
+        }
 
         pollerJob = scope.launch(Dispatchers.Default) {
             while (isActive) {
-                // Poll regularly for powerManager status and verify battery temperature
-                val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-                val tempRaw = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
-                val tempC = tempRaw / 10.0f
-                evaluateThermalState(tempC)
+                try {
+                    val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                    val tempRaw = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+                    processRawTemperature(tempRaw)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Polling thermal state error", e)
+                }
                 delay(3000)
             }
         }
@@ -80,9 +92,26 @@ class ThermalMonitor(
         } catch (_: Exception) {}
     }
 
+    private fun processRawTemperature(tempRaw: Int) {
+        // Android battery temperature is reported in tenths of a degree Celsius (e.g. 350 = 35.0°C)
+        // Guard against missing, uninitialized or sensor dummy values (< 1°C or > 95°C)
+        if (tempRaw in 10..950) {
+            val tempC = tempRaw / 10.0f
+            lastValidTempC = tempC
+            evaluateThermalState(tempC)
+        } else {
+            // Keep evaluating based on the last verified valid reading
+            evaluateThermalState(lastValidTempC)
+        }
+    }
+
     private fun evaluateThermalState(tempC: Float) {
         val powerStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && powerManager != null) {
-            powerManager.currentThermalStatus
+            try {
+                powerManager.currentThermalStatus
+            } catch (_: Exception) {
+                PowerManager.THERMAL_STATUS_NONE
+            }
         } else {
             PowerManager.THERMAL_STATUS_NONE
         }
@@ -96,13 +125,15 @@ class ThermalMonitor(
         var durationMs = 0L
         var triggeredEmergency = false
 
-        if (tempC >= 45.0f) {
+        // Continuous overheating threshold: strictly requires verified real temp >= 45°C
+        if (tempC >= 45.0f && tempC < 95.0f) {
             val now = SystemClock.elapsedRealtime()
             val start = emergencyStartTimeMs ?: now.also { emergencyStartTimeMs = it }
             durationMs = now - start
-            // 3 minutes = 180,000 ms
-            if (durationMs >= 180_000L && !_thermalState.value.emergencyShutdownTriggered) {
+
+            if (durationMs >= EMERGENCY_DURATION_MS && !_thermalState.value.emergencyShutdownTriggered) {
                 triggeredEmergency = true
+                Log.e(TAG, "EMERGENCY: Sustained overheating >= 45°C for > 3 minutes. Triggering safe shutdown.")
                 onEmergencyShutdownRequired()
             }
         } else {
